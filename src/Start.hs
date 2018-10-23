@@ -30,7 +30,7 @@ reset args = do
     putStrLn "Resetting..."
 
     mongo <- M.connect $ M.host (A.mongoURL args)
-    M.access mongo M.master (A.mongoTable args) resetDB
+    M.access mongo M.master (A.mongoTable args) $ resetDB args
 
     putStrLn "Resetted!"
 
@@ -40,4 +40,4 @@ start = do
 
     case args of
         A.Serve{..} -> serve args
-        A.Reset{..}   -> reset args
+        A.Reset{..} -> reset args

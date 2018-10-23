@@ -15,7 +15,6 @@ import qualified Data.List        as L
 -- Upload chunks to MongoDB
 uploadChunks :: [BS.ByteString] -> String -> Action IO ()
 uploadChunks chunks name = do
-    id <- getNewFileID
     let docs = toDocs chunks name
     insertMany "files" docs
     return ()

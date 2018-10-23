@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Новый пост</title>
+		<link rel="stylesheet" type="text/css" href="/static/css/main.css">
+	</head>
+	<body>
+		<form id="post-form" enctype="multipart/form-data" method="POST" action="/publish">
+			Название поста: <input type="text" id="post-name">
+			<div id="post-content">
+			</div>
+			<input type="button" id="add-text"  value="Добавить текст">
+			<input type="button" id="add-image" value="Добавить картинку">
+			<input type="submit" value="Опубликовать">
+		</form>
+		<script type="text/javascript" src="/static/js/new-post.js"></script>
+	</body>
+</html>

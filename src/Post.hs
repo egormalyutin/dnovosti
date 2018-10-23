@@ -11,7 +11,7 @@ import Util
 -- Content of Post
 data Content = Text  {     text :: String }
              | Image { filename :: String }
-               deriving (Generic, Show)
+               deriving (Generic)
 
 instance ToJSON Content
 
@@ -20,7 +20,7 @@ data Post = Post {
                    postID :: ID
                  , name :: String
                  , content :: [Content]
-                 } deriving (Generic, Show)
+                 } deriving (Generic)
 
 instance ToJSON Post
 
@@ -61,3 +61,13 @@ getNewPostID = getNewID "posts"
 -- Add post to posts
 addPost :: Post -> Action IO ()
 addPost = addItem "posts" toMongoPost
+
+-- Generate post feed
+getFeed :: Int -> Int -> Action IO [Post]
+getFeed offset count = do
+    docs <- rest =<< find (select [] "posts") {
+                                                sort = ["postID" =: (-1 :: Int)]
+                                              , skip = fromIntegral offset
+                                              , limit = fromIntegral count
+                                              }
+    return $ toPost <$> docs
