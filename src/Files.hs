@@ -5,6 +5,7 @@ module Files (uploadFile, getFile) where
 import           Args
 import qualified Data.ByteString  as BS
 import           Database.MongoDB
+import qualified Database.MongoDB as M
 import           Util
 import qualified Data.List        as L
 
@@ -20,12 +21,12 @@ uploadChunks chunks name = do
     return ()
 
 -- Upload file to MongoDB
-uploadFile :: Pipe -> Args -> BS.ByteString -> IO String
-uploadFile mongo args bs = do
+uploadFile :: BS.ByteString -> M.Action IO String
+uploadFile bs = do
     let chunks = splitBy (10 ^ 6) bs
-    id <- access mongo master (mongoTable args) $ getNewFileID
+    id <- getNewFileID
     let name = show id
-    access mongo master (mongoTable args) $ uploadChunks chunks name
+    uploadChunks chunks name
     return name
 
 ---------------------------------------------
@@ -40,9 +41,9 @@ getChunks name = do
     return $ toChunks docs'
 
 -- Download file from MongoDB
-getFile :: Pipe -> Args -> String -> IO (Maybe BS.ByteString)
-getFile mongo args name = do
-    chunks <- access mongo master (mongoTable args) $ getChunks name
+getFile :: String -> Action IO (Maybe BS.ByteString)
+getFile name = do
+    chunks <- getChunks name
     if length chunks > 0
         then return . Just $ BS.concat chunks
         else return Nothing

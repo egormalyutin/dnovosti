@@ -29,6 +29,9 @@ dependencies:
 - directory
 - bytestring
 - split
+- JuicyPixels
+- JuicyPixels-extra
+- mtl
 
 library:
   source-dirs: src

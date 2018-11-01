@@ -20,42 +20,75 @@ import           Data.Maybe
 import           GHC.Generics
 import           Util
 import           Happstack.Server.FileServe.BuildingBlocks
+import           Image
+import           Control.Concurrent
+import           User
 
 bodyPolicy :: BodyPolicy
 bodyPolicy = defaultBodyPolicy "/tmp/" (30*10^6) (30*10^6) 100000
 
-getAttachments :: Pipe -> Args -> ServerPartT IO [Content]
-getAttachments mongo args = getter 0
+-- TODO: workers
+-- TODO: check image existence
+-- TODO: protect forms
+-- TODO: captcha
+-- TODO: i18n
+
+getAttachments :: Pipe -> Args -> ID -> ServerPartT IO (Either String [Content])
+getAttachments mongo args post = getter 0
     where getter i = do
               r1 <- R.getDataFn . R.look $ "text" ++ (show i)
               case r1 of
                   Right text -> do
                       other <- getter $ i + 1
-                      return $ Text text : other
+                      case other of
+                          Left err -> return . Left $ err
+                          Right cont -> return . Right $ Text text : cont
                   Left _ -> do
                       r2 <- R.getDataFn . R.lookFile $ "image" ++ (show i)
                       case r2 of
                           Right (path, _, _) -> do
-                              other <- getter $ i + 1
-
                               -- upload file contents to MongoDB
                               contents <- liftIO $ BS.readFile path
-                              name <- liftIO $ uploadFile mongo args contents
 
-                              return $ Image name : other
-                          Left _ -> return []
+                              -- upload first contents
+                              -- name <- liftIO . access mongo master (mongoTable args) $ uploadFile contents
+
+                              -- liftIO . forkIO $ do
+                              --     names <- access mongo master (mongoTable args) $ uploadImage contents
+                              --     case names of
+                              --         Nothing -> return . Left $ "Cannot parse image at image" ++ (show i)
+                              --         Just ln -> do
+                              --             other <- getter $ i + 1
+                              --             case other of
+                              --                 Left err -> return . Left $ err
+                              --                 Right cont -> return . Right $ Image ln : cont
+
+                              succ <- liftIO $ uploadImageWorker contents mongo args post
+
+                              case succ of
+                                  Left err -> return . Left $ err
+                                  Right num -> do
+                                      other <- getter $ i + 1
+                                      case other of
+                                          Left err -> return . Left $ err
+                                          Right cont -> return . Right $ Image num : cont
+
+                          Left _ -> return $ Right []
 
 api :: Args -> Pipe -> IO (ServerPartT IO Response)
 api args@(Serve port url table path) mongo = do
-    let publishedPath = path ++ "/published.html"
+    let srv file = srvFile $ path ++ "/" ++ file
+
     return $ msum [
                     dir "publish" $ do
                         method POST
 
+                        allowed <- cookiesAuth args mongo [CreatePosts]
+                        liftIO $ print allowed
+
                         decodeBody bodyPolicy
 
                         -- extract post data
-                        contents <- getAttachments mongo args
                         postName <- R.getDataFn $ R.look "name"
 
                         case postName of
@@ -63,23 +96,34 @@ api args@(Serve port url table path) mongo = do
 
                             Right postName -> do
                                 postID <- liftIO . access mongo master table $ getNewPostID
+                                contents <- getAttachments mongo args postID
+                                case contents of
+                                    Left err -> badRequest . respStr $ "Invalid request: " ++ err
+                                    Right cont -> do
 
-                                -- push post
-                                let post = Post {
-                                                  postID = postID
-                                                , name = postName
-                                                , content = contents
-                                                }
+                                        -- liftIO . forkIO $ do
+                                        --     names <- access mongo master (mongoTable args) $ uploadImage contents
+                                        --     case names of
+                                        --         Nothing -> print $ "Cannot parse image at image" ++ (show i)
+                                        --         Just ln -> do
+                                        --             print ln
 
-                                liftIO . access mongo master table $ addPost post
+                                        -- push post
+                                        let post = Post {
+                                                          postID = postID
+                                                        , name = postName
+                                                        , content = cont
+                                                        }
 
-                                -- serve published.html
-                                serveFile (guessContentTypeM mimeTypes) publishedPath
+                                        liftIO . access mongo master table $ addPost post
+
+                                        -- serve published.html
+                                        srv "published.html"
 
                   , dir "file" . H.path $ \name -> do
                         method GET
 
-                        file <- liftIO $ getFile mongo args name
+                        file <- liftIO . access mongo master table $ getFile name
                         case file of
                             Just bs -> ok $ toResponse bs
                             Nothing -> notFound . respStr $ "Not found file " ++ name
@@ -89,7 +133,8 @@ api args@(Serve port url table path) mongo = do
 
                         parseField "ids" parseIDs $ \nums -> do
                             posts <- liftIO . access mongo master table $ getPosts nums
-                            ok . toResponse $ encode posts
+                            posts' <- liftIO . access mongo master table $ mapM loadFilenames posts
+                            ok . toResponse $ encode posts'
 
                   , dir "getFeed" $ do
                         method GET
@@ -97,7 +142,8 @@ api args@(Serve port url table path) mongo = do
                         parseField "offset" parseInt $ \offset -> do
                             parseField "count" parseInt $ \count -> do
                                 posts <- liftIO . access mongo master table $ getFeed offset count
-                                ok . toResponse $ encode posts
+                                posts' <- liftIO . access mongo master table $ mapM loadFilenames posts
+                                ok . toResponse $ encode posts'
                   ]
 
 
@@ -164,3 +210,14 @@ srvFile path = serveFile getMimeType $ path
 -- Serve directory by name
 srvDir :: String -> ServerPartT IO Response
 srvDir path = serveDirectory' DisableBrowsing [] getMimeType $ path
+
+-- Cookies auth
+cookiesAuth :: Args -> Pipe -> [Permission] -> ServerPartT IO Bool
+cookiesAuth args mongo perms = do
+    login <- R.getDataFn $ R.readCookieValue "login"
+    password <- R.getDataFn $ readCookieValue "password"
+    case login of
+        Right l -> case password of
+            Right p -> liftIO . access mongo master (mongoTable args) $ checkAuth l p perms
+            Left _ -> return False
+        Left _ -> return False

@@ -5,6 +5,7 @@ module User where
 import Database.MongoDB hiding (find)
 import Util
 import Data.List (find)
+import Control.Monad.Trans
 
 -- User permisssions
 data Permission = CreatePosts | RegisterUsers deriving (Show, Eq)
@@ -32,7 +33,7 @@ toMongoPerm tp = case find (\(t,_) -> t == tp) permMappings of
 -- Post on site
 data User = User {
                    userID :: ID
-                 , username :: String
+                 , login :: String
                  , password :: String
                  , permissions :: [Permission]
                  }
@@ -41,7 +42,7 @@ data User = User {
 toMongoUser :: User -> Document
 toMongoUser user = [
                      "userID" =: userID user
-                   , "username" =: username user
+                   , "login" =: login user
                    , "password" =: password user
                    , "permissions" =: permissions user <$>> toMongoPerm
                    ]
@@ -50,7 +51,7 @@ toMongoUser user = [
 toUser :: Document -> User
 toUser doc = User {
                     userID = at "userID" doc
-                  , username = at "username" doc
+                  , login = at "login" doc
                   , password = at "password" doc
                   , permissions = at "permissions" doc <$>> toPerm
                   }
@@ -66,3 +67,18 @@ getNewUserID = getNewID "users"
 -- Add user to users
 addUser :: User -> Action IO ()
 addUser = addItem "users" toMongoUser
+
+-- Check user login, password and permissions
+checkAuth :: String -> String -> [Permission] -> Action IO Bool
+checkAuth login password perms = do
+    user <- findOne $ select ["login" =: login, "password" =: password] "users"
+    case user of
+        Just doc -> do
+            let user = toUser doc
+            return $ checkPerms (permissions user) perms
+
+        Nothing -> return False
+
+-- Check user permissions and needed
+checkPerms :: [Permission] -> [Permission] -> Bool
+checkPerms userPerms = foldr (\perm all -> all && Nothing /= (find (==perm) userPerms)) True

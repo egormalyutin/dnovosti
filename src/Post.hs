@@ -7,10 +7,14 @@ import Database.MongoDB
 import GHC.Generics
 import Data.Aeson
 import Util
+import Image
 
 -- Content of Post
-data Content = Text  {     text :: String }
-             | Image { filename :: String }
+data Content = Text  { text    :: String }
+             | Image { imageID :: Int    }
+
+             | ImageFull { filenames :: [ImageWithSize] }
+
                deriving (Generic)
 
 instance ToJSON Content
@@ -33,8 +37,8 @@ toMongoPost post = [
                         \x -> case x of
 
                             -- Convert Content to BSON
-                            Text str       -> [ "type" =: ("text"  :: String), "text"     =: str      ]
-                            Image filename -> [ "type" =: ("image" :: String), "filename" =: filename ]
+                            Text str -> [ "type" =: ("text"  :: String), "text"    =: str ]
+                            Image id -> [ "type" =: ("image" :: String), "imageID" =: id  ]
                    ]
 
 -- Convert BSON to Post
@@ -46,8 +50,8 @@ toPost doc = Post {
                         \doc -> case at "type" doc :: String of
 
                         -- Convert BSON to Content
-                            "text"  -> Text  $ at "text"     doc
-                            "image" -> Image $ at "filename" doc
+                            "text"  -> Text  $ at "text"    doc
+                            "image" -> Image $ at "imageID" doc
                   }
 
 -- Get posts by IDs
@@ -71,3 +75,17 @@ getFeed offset count = do
                                               , limit = fromIntegral count
                                               }
     return $ toPost <$> docs
+
+-- Load filenames in post
+loadFilenames :: Post -> Action IO Post
+loadFilenames post = do
+    c <- mapM (
+        \c -> case c of
+            Image id -> do
+                f <- getImageWithSize id
+                return . ImageFull $ f
+
+            other -> return other
+        ) $ content post
+
+    return $ post { content = c }
